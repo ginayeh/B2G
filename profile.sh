@@ -276,6 +276,7 @@ HELP_capture="Signals, pulls, and symbolicates the profile data"
 cmd_capture() {
   video=0
 
+  rm profile_*
   while getopts "s:v" opt "$@"; do
     case $opt in
       s)
@@ -409,6 +410,12 @@ cmd_capture() {
   # cmd_pull should remove each file as we pull it. This just covers the
   # case where it doesn't
   remove_profile_files
+
+  . ./setup.sh
+  mkdir -p /tmp/mmap
+  rm /tmp/mmap/*
+  ./scripts/tasktracer.sh get_mmaps
+  ./scripts/tasktracer-converter.py
 }
 
 ###########################################################################
