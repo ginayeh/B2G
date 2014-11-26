@@ -13,6 +13,8 @@ import subprocess
 
 tasks = {}
 sorted_tasks = {}
+unrun_tasks = set([])
+unfinished_tasks = set([])
 processes = {}
 threads = {}
 _unwanted_dup_names = set(['vtable for mozilla::ipc::DoWorkRunnable',
@@ -35,6 +37,7 @@ class Process(BaseObject):
   def __init__(self, id, name):
     super(Process, self).__init__(id, name)
     self._mem_offset = 0
+    self._start = 0
 
 class Thread(BaseObject):
   def __init__(self, id, name):
@@ -195,20 +198,6 @@ def parse_log(log, process_id):
 
     set_task_info(info, process_id)
 
-def retrieve_begin_end_time():
-  """Scan through all timestamps and return the min and the max."""
-  all_timestamps = Set([])
-  for task_id, task_object in tasks.iteritems():
-    all_timestamps.add(task_object.dispatch)
-    all_timestamps.add(task_object.begin)
-    all_timestamps.add(task_object.end)
-
-  # The initial value for these timestamps is 0, so we have to remove it.
-  if 0 in all_timestamps:
-    all_timestamps.remove(0)
-
-  return [min(all_timestamps), max(all_timestamps)]
-
 def output_json(output_name, begin_time, end_time):
   """
     Write tasks out in JSON format.
@@ -294,7 +283,8 @@ def read_log(input_folder):
       {
         "tasktracer": {
           "data": [{log1}, {log2}, {log3}, ...],
-          "threads": [{t1}, {t2}, {t3}, ...]
+          "threads": [{t1}, {t2}, {t3}, ...],
+          "start": ...,
         }
       }
   """
@@ -313,6 +303,7 @@ def read_log(input_folder):
       json_data = json.load(json_file)
       task_info = json_data["tasktracer"]["data"]
       thread_info = json_data["tasktracer"]["threads"]
+      processes[process_id]._start = json_data["tasktracer"]["start"]
 
     # Set up thread info.
     for t in thread_info:
@@ -355,12 +346,35 @@ def remove_dup_tasks():
     pass
   pass
 
+def replace_with_relative_time(begin):
+  """
+    Convert dispatch/begin/end to relative timestamp.
+    Return max timestamp.
+  """
+  max_time = 0
+  global unrun_tasks, unfinished_tasks
+  for task in tasks.itervalues():
+    if task.dispatch != 0:
+      task.dispatch = task.dispatch - begin
 
-def replace_undefined_dispatch(value):
-  """Replace undefined dispatch with the min of all timestamps."""
-  for task_id, task_object in tasks.iteritems():
-    if task_object.dispatch == 0:
-      task_object.dispatch = value
+    if task.begin != 0:
+      task.begin = task.begin - begin
+    else:
+      unrun_tasks.add(task.id)
+
+    if task.end != 0:
+      task.end = task.end - begin
+    else:
+      unfinished_tasks.add(task.id)
+
+    if task.dispatch > max_time:
+      max_time = task.dispatch
+    if task.begin > max_time:
+      max_time = task.begin
+    if task.end > max_time:
+      max_time = task.end
+
+  return max_time
 
 def main():
   input_log_path = environ['ANDROID_BUILD_TOP']
@@ -384,7 +398,7 @@ def main():
     read_mmap(mmap_path)
     retrieve_task_name(nm_path, libxul_path)
 
-    print '\nRemoving duplicated tasks...'
+    # Removing duplicated tasks.
     remove_dup_tasks()
   except ParseError as error:
     print error.msg
@@ -394,14 +408,30 @@ def main():
   if len(tasks) == 0:
     sys.exit()
 
-  [begin_time, end_time] = retrieve_begin_end_time();
-  replace_undefined_dispatch(begin_time);
+  process_start_min = None
+  for p in processes.itervalues():
+    if process_start_min == None:
+      process_start_min = p._start
+    elif p._start < process_start_min:
+      process_start_min = p._start
+
+  # Replacing with relative timestamp.
+  begin_time = 0
+  end_time = replace_with_relative_time(process_start_min)
+
+  # Filling incomplete tasks with end time.
+  for task_id in unrun_tasks:
+    tasks[str(task_id)].begin = end_time
+    tasks[str(task_id)].end = end_time
+
+  for task_id in unfinished_tasks:
+    tasks[str(task_id)].end = end_time
 
   # Sort tasks by dispatch time.
   global sorted_tasks
   sorted_tasks = sorted(tasks.values(), key=operator.attrgetter('dispatch'))
 
-  output_json('task_tracer_data.json', begin_time, end_time)
+  output_json('tasktracer_data.json', begin_time, end_time)
 
   print '\nDone! {} tasks has been written to task_tracer_data.json successfully.'.format(len(tasks))
 
