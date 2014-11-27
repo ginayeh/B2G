@@ -367,6 +367,10 @@ def replace_with_relative_time(begin):
     else:
       unfinished_tasks.add(task.id)
 
+    if task.labels:
+      for l in task.labels:
+        l.timestamp = l.timestamp - begin
+
     if task.dispatch > max_time:
       max_time = task.dispatch
     if task.begin > max_time:
@@ -387,7 +391,7 @@ def main():
   print 'Input mmap path:', mmap_path
   print 'libxul.so path:', libxul_path
   print 'nm path:', nm_path
-  print 'Output: task_tracer_data.json'
+  print 'Output: tasktracer_data.json'
   print '====================================================='
 
   try:
@@ -433,7 +437,7 @@ def main():
 
   output_json('tasktracer_data.json', begin_time, end_time)
 
-  print '\nDone! {} tasks has been written to task_tracer_data.json successfully.'.format(len(tasks))
+  print '\nDone! {} tasks has been written to tasktracer_data.json successfully.'.format(len(tasks))
 
 if __name__ == '__main__':
   sys.exit(main())
