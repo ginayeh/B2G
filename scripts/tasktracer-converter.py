@@ -19,6 +19,7 @@ processes = {}
 threads = {}
 _unwanted_dup_names = set(['vtable for mozilla::ipc::DoWorkRunnable',
                            'vtable for nsTimerEvent'])
+removed_tasks = []
 
 class ParseError(Exception):
   def __init__(self, error_msg):
@@ -356,6 +357,13 @@ def replace_with_relative_time(begin):
   for task in tasks.itervalues():
     if task.dispatch != 0:
       task.dispatch = task.dispatch - begin
+    else:
+      # HACK. These tasks are created before profiler is started.
+      removed_tasks.append(task.id)
+
+    # HACK. Re-assign dispatch time of nsTimerImpl.
+    if task.name == 'vtable for nsTimerImpl':
+      task.dispatch = task.begin - begin
 
     if task.begin != 0:
       task.begin = task.begin - begin
@@ -430,6 +438,10 @@ def main():
 
   for task_id in unfinished_tasks:
     tasks[str(task_id)].end = end_time
+
+  # HACK
+  for task_id in removed_tasks:
+    del tasks[str(task_id)]
 
   # Sort tasks by dispatch time.
   global sorted_tasks
